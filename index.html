@@ -64,7 +64,7 @@
         .btn-no{background:0 0;color:#ff007f;border:2px solid #ff007f}
         .btn-no:hover{background:#ff007f;color:#fff;box-shadow:0 0 15px #ff007f}
         
-        #touch-controls{position:absolute;bottom:30px;left:0;right:0;display:flex;justify-content:space-between;padding:0 25px;z-index:25;pointer-events:none}
+        #touch-controls{position:absolute;bottom:30px;left:0;right:0;display:flex;justify-content:space-between;padding:0 40px;z-index:25;pointer-events:none}
         .touch-btn{width:70px;height:70px;border-radius:50%;background:rgba(255,255,255,0.08);border:none;color:rgba(255,255,255,0.6);display:flex;align-items:center;justify-content:center;font-size:28px;pointer-events:all;cursor:pointer;user-select:none;-webkit-user-select:none;transition:all .2s; backdrop-filter: blur(2px);}
         .touch-btn:active,.touch-btn.pressed{background:rgba(255,255,255,0.25);color:rgba(255,255,255,1);transform:scale(0.92);}
         #touch-jump{width:75px;height:75px;font-size:34px;background:rgba(255,255,255,0.1);}
@@ -172,16 +172,15 @@
     <canvas id="gameCanvas"></canvas>
     
     <div id="touch-controls">
-        <div class="touch-side-buttons">
-            <div class="touch-btn" id="touch-left">◀</div>
-            <div class="touch-btn" id="touch-right">▶</div>
-        </div>
         <div class="touch-action-buttons">
             <div class="touch-btn" id="touch-fly">🚀</div>
+        </div>
+        <div class="touch-action-buttons">
             <div class="touch-btn" id="touch-shoot">🎯</div>
-            <div class="touch-btn" id="touch-jump">↑</div>
         </div>
     </div>
+    <!-- iOS gyroscope permission button -->
+    <button id="gyro-btn" onclick="requestGyro()" style="display:none;position:absolute;bottom:110px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#00ffcc;border:1px solid #00ffcc;padding:8px 18px;font-size:13px;border-radius:20px;z-index:30;cursor:pointer;">📡 გაიროსკოპი</button>
 
     <script>
         const TARGET_FPS = 60, TARGET_FRAME_TIME = 1000 / TARGET_FPS;
@@ -249,9 +248,6 @@
         renderLeaderboard();
 
         function setupTouchControls() {
-            let btnL = document.getElementById('touch-left');
-            let btnR = document.getElementById('touch-right');
-            let btnJ = document.getElementById('touch-jump');
             let btnS = document.getElementById('touch-shoot');
             let btnF = document.getElementById('touch-fly');
             
@@ -263,9 +259,6 @@
                 el.addEventListener('mouseup', e => { onEnd(); el.classList.remove('pressed'); });
             }
             
-            addTouch(btnL, () => { touchLeft = true; keys['a'] = true; }, () => { touchLeft = false; keys['a'] = false; });
-            addTouch(btnR, () => { touchRight = true; keys['d'] = true; }, () => { touchRight = false; keys['d'] = false; });
-            addTouch(btnJ, () => { initAudio(); player.jump(); }, () => {});
             addTouch(btnS, () => { initAudio(); shootProjectile(); }, () => {});
             addTouch(btnF, () => { initAudio(); activateFlight(); }, () => {});
             
@@ -274,6 +267,79 @@
             }
         }
         setupTouchControls();
+
+        // ========== ეკრანის შეხება = ხტომა ==========
+        // ნებისმიერ ადგილას შეხება ხტომას იწვევს (გარდა ღილაკებისა)
+        document.addEventListener('touchstart', function(e) {
+            if (!gameActive || isPaused) return;
+            // თუ შეხება მოხდა touch-controls-ზე, იგნორირება
+            let tc = document.getElementById('touch-controls');
+            for (let t of e.changedTouches) {
+                let el = document.elementFromPoint(t.clientX, t.clientY);
+                if (tc && (tc === el || tc.contains(el))) continue;
+                // ეკრანის შეხება = ხტომა
+                initAudio();
+                player.jump();
+                break;
+            }
+        }, {passive: true});
+
+        // ========== გაიროსკოპი = მარჯვენა/მარცხენა ==========
+        let gyroEnabled = false;
+        let gyroTiltX = 0; // -1 (მარცხნივ) ... +1 (მარჯვნივ)
+        const GYRO_DEADZONE = 3;   // გრადუსი – ამ ზონაში არ მოძრაობს
+        const GYRO_MAX     = 25;   // გრადუსი – სრული სიჩქარე
+
+        function handleOrientation(e) {
+            if (!gameActive || isPaused) return;
+            // gamma: -90..+90, გვერდზე გადახრა
+            let gamma = e.gamma || 0;
+            // deadzone
+            if (Math.abs(gamma) < GYRO_DEADZONE) {
+                gyroTiltX = 0;
+            } else {
+                let sign = gamma > 0 ? 1 : -1;
+                let abs = Math.abs(gamma) - GYRO_DEADZONE;
+                let range = GYRO_MAX - GYRO_DEADZONE;
+                gyroTiltX = sign * Math.min(1, abs / range);
+            }
+            // keys სტატუსი გაიროს მიხედვით
+            if (gyroTiltX < -0.15) {
+                keys['a'] = true;  keys['d'] = false;
+            } else if (gyroTiltX > 0.15) {
+                keys['d'] = true;  keys['a'] = false;
+            } else {
+                // გაიროს ღერძი ნეიტრალურია, ხელის ღილაკი არ უნდა გადათიშოს
+                if (!touchLeft)  keys['a'] = false;
+                if (!touchRight) keys['d'] = false;
+            }
+        }
+
+        // iOS 13+ მოითხოვს ნებართვას
+        function requestGyro() {
+            if (typeof DeviceOrientationEvent !== 'undefined' &&
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(resp => {
+                        if (resp === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation, true);
+                            gyroEnabled = true;
+                            document.getElementById('gyro-btn').style.display = 'none';
+                        }
+                    }).catch(console.error);
+            } else {
+                window.addEventListener('deviceorientation', handleOrientation, true);
+                gyroEnabled = true;
+                document.getElementById('gyro-btn').style.display = 'none';
+            }
+        }
+
+        // auto-try Android / older browsers (no permission needed)
+        if (typeof DeviceOrientationEvent !== 'undefined' &&
+            typeof DeviceOrientationEvent.requestPermission !== 'function') {
+            window.addEventListener('deviceorientation', handleOrientation, true);
+            gyroEnabled = true;
+        }
 
         function selectCharacter(c) { selectedChar = c; document.querySelectorAll('.char-btn').forEach(b => b.classList.remove('selected')); document.getElementById('btn-'+c).classList.add('selected'); }
         function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); }
@@ -778,7 +844,11 @@
         window.teleportToSpace = function(ts) {
             initAudio(); document.getElementById('menu').style.display = 'none'; document.getElementById('pause-menu').style.display = 'none'; 
             if (animationId) { cancelAnimationFrame(animationId); animationId = null; }
-            gameActive = true; isPaused = false; 
+            gameActive = true; isPaused = false;
+            // iOS gyro ღილაკი
+            if (!gyroEnabled && typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                document.getElementById('gyro-btn').style.display = 'block';
+            }
             
             let newY = 600 - (ts * 40); 
             player.y = newY - player.h - 1; player.x = 233; player.vx = 0; player.vy = 0; player.jumpsLeft = 2; player.trail = []; player.landSquish = 0; player.idleBob = 0; 
